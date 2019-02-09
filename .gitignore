@@ -1,2 +1,2 @@
 # Ignore new MMRCsettings.h files
-mmrc-client/MMRCsettings.h
+**/MMRCsettings.h
