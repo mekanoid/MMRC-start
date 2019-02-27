@@ -1,6 +1,21 @@
+// ------------------------------------------------------------
+//
+//    MMRC client for controlling built-in LED
+//    Copyright (C) 2019 Peter Kindström
+//
+//    Code to use as a starting point for MMRC clients
+//
+//    This program is free software: you can redistribute
+//    it and/or modify it under the terms of the GNU General
+//    Public License as published by the Free Software 
+//    Foundation, either version 3 of the License, or
+//    (at your option) any later version.
+//
+// -----------------------------------------------------------
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 #include "MMRCsettings.h"
+
 
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
@@ -22,7 +37,17 @@ String subTopic[nbrTopics];
 String pubTopic[1];
 
 // Variables for client info
-String clientID;
+String clientID;      // Id/name for this specific client, shown i MQTT and router
+
+// Variables to indicate if action is in progress
+int actionOne = 0;    // To 'remember' than an action is in progress
+int btnState = 0;     // To get two states from a momentary button
+
+// Define which pins to use for different actions
+int btnOnePin = 5;    // Pin for first button
+
+// Uncomment next line to use built in LED on NodeMCU (which is D4)
+#define LED_BUILTIN D4
 
 
 /*
@@ -33,7 +58,9 @@ void setup() {
   Serial.begin(115200);
 
   // Define build-in LED pin as output
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(LED_BUILTIN, OUTPUT);   // For Arduion, Weoms D1 min
+//  pinMode(LED, OUTPUT);   // For NodeMCU
+  pinMode(btnOnePin, INPUT);   // 
 
   // Assemble topics to subscribe and publish to
   if (cccCLEES == "1") {
@@ -48,9 +75,9 @@ void setup() {
 
   // Unique name for this client
   if (cccCLEES == "1") {
-    clientID = "CLEES "+cccObject;
+    clientID = "CLEES "+cccModule;
   } else {
-    clientID = "MMRC "+cccObject;
+    clientID = "MMRC "+cccModule;
   }
 
   // Connect to wifi network
@@ -205,11 +232,16 @@ void mqttPublish(String pbTopic, String pbPayload) {
   // Report back to pubTopic[]
   int check = client.publish(tpc, msg);
 
+  // TODO check "check" integer to see if all went ok
+
   // Print information
   Serial.print("Message sent    [");
   Serial.print(pbTopic);
   Serial.print("] ");
   Serial.println(pbPayload);
+
+  // Action 1 is executed, ready for new action
+  actionOne = 0;
 
 }
 
@@ -219,8 +251,28 @@ void loop()
   // Check connection to the MQTT broker. If no connection, try to reconnect
   if (!client.connected()) {
     mqttConnect();
-  }
+    }
 
   // Wait for incoming messages
   client.loop();
+
+  // Check for button press
+  int btnOnePress = digitalRead(btnOnePin);
+  if (btnOnePress == LOW && actionOne == 0) {
+    Serial.println("Button One pressed");
+    delay(300);
+
+    // Publish button press
+    btnState = 1-btnState;    // Change state of Action
+    if (btnState == 0) {
+        mqttPublish(subTopic[0], "1");
+      } else {
+        mqttPublish(subTopic[0], "0");
+      }
+    
+    // Action 1 is executing, new actions forbidden
+    actionOne = 1;
+
+    }
+
 }
