@@ -47,7 +47,7 @@ int btnState = 0;     // To get two states from a momentary button
 int btnOnePin = 5;    // Pin for first button
 
 // Uncomment next line to use built in LED on NodeMCU (which is D4)
-#define LED_BUILTIN D4
+// #define LED_BUILTIN D4
 
 
 /*
@@ -58,9 +58,10 @@ void setup() {
   Serial.begin(115200);
 
   // Define build-in LED pin as output
-  pinMode(LED_BUILTIN, OUTPUT);   // For Arduion, Weoms D1 min
-//  pinMode(LED, OUTPUT);   // For NodeMCU
-  pinMode(btnOnePin, INPUT);   // 
+  pinMode(LED_BUILTIN, OUTPUT);
+
+  // Set button pin
+  pinMode(btnOnePin, INPUT);
 
   // Assemble topics to subscribe and publish to
   if (cccCLEES == "1") {
@@ -146,9 +147,9 @@ void mqttConnect() {
     Serial.println("connected");
     Serial.print("MQTT client id: ");
     Serial.println(tmpID);
-    Serial.println("Subscribing to:");
 
     // Subscribe to all topics
+    Serial.println("Subscribing to:");
     for (int i=0; i < nbrTopics; i++){
       // Convert String to char* for the client.subribe() function to work
       subTopic[i].toCharArray(tmpTopic, subTopic[i].length()+1);
@@ -170,6 +171,12 @@ void mqttConnect() {
   }
   Serial.println("---");
 
+}
+
+/**
+ * Function to handle subscriptions
+ */
+void mqttSubscribe {
 }
 
 /**
