@@ -14,6 +14,11 @@
 // -----------------------------------------------------------
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
+
+#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>
+
 #include "MMRCsettings.h"
 
 
@@ -82,7 +87,12 @@ void setup() {
   }
 
   // Connect to wifi network
-  wifiConnect();
+  WiFiManager wifiManager;
+
+  //first parameter is name of access point, second is the password
+  wifiManager.autoConnect("AP-NAME", "AP-PASSWORD");
+
+//  wifiConnect();
   delay(1000);
 
   // Connect to MQTT broker and define function to handle callbacks
@@ -176,8 +186,8 @@ void mqttConnect() {
 /**
  * Function to handle subscriptions
  */
-void mqttSubscribe {
-}
+//void mqttSubscribe {
+//}
 
 /**
  * Function to handle MQTT messages sent to this device
