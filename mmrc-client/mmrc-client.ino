@@ -15,44 +15,88 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
-#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
-#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <DNSServer.h>            // Local DNS server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     // Local web server used to serve the configuration portal
 #include <WiFiManager.h>
 
 #include "MMRCsettings.h"
 
-
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
-// Convert settings in MMRCsettings.h to constants and variables
-const char* ssid = SSID;
-const char* password = PASSWORD;
-const char* mqttBrokerIP = IP;
-String cccCategory = CATEGORY;
-String cccModule = MODULE;
-String cccObject = OBJECT;
-String cccCLEES = CLEES;
+// ------------------------------------------------------------
+// Get values from MMRCsettings.h and define default configuration
+
+// Device configuration
+// If the same variable is found in "config.json" that value will be used instead
+char cfgMqttServer[20] = BROKERIP;
+char cfgMqttPort[6] = BROKERPORT;
+char cfgMqttRetry[6] = BROKERRETRY;
+char cfgDeviceId[40] = DEVICEID;
+char cfgDeviceName[40] = DEVICENAME;
+
+// Node configuration
+// If the same variable is found in "config.json" that value will be used instead
+char cfgNode01Name[40] = NODE01NAME;
+char cfgNode01Prop01Name[40] = NODE01PROP01NAME;
+char cfgNode01Prop02Name[40] = NODE01PROP02NAME;
+char cfgSpecial01[5] = SPECIAL01;
+char cfgSpecial02[5] = SPECIAL02;
+
+// Node configuration
+// Will NOT be overwritten by "config.json"
+String node01Id = NODE01ID;
+String node01Type = NODE01TYPE;
+String node01Prop01 = NODE01PROP01;
+String node01Prop01Datatype = NODE01PROP01DATATYPE;
+String node01Prop02 = NODE01PROP02;
+String node01Prop02Datatype = NODE01PROP02DATATYPE;
+
+// Strings to be set after getting configuration from file
+String deviceID;
+String deviceName;
+String node01Name;
+String node01Prop01Name;
+String node01Prop02Name;
+String special01;
+String special02;
+int mqttRetry;
+
+// ------------------------------------------------------------
+// Define topic variables
 
 // Variable for topics to subscribe to
-const int nbrTopics = 1;
-String subTopic[nbrTopics];
+const int nbrSubTopics = 1;
+String subTopic[nbrSubTopics];
 
 // Variable for topics to publish to
-String pubTopic[1];
+const int nbrPubTopics = 9;
+String pubTopic[nbrPubTopics];
+String pubTopicContent[nbrPubTopics];
+
+// Often used topics
+String pubTopicOne;
+String pubTopicDeviceState;
+
+// ------------------------------------------------------------
+// Other variables
 
 // Variables for client info
-String clientID;      // Id/name for this specific client, shown i MQTT and router
-
+char* clientID;      // Id/name for this specific client, shown i MQTT and router
+  
 // Variables to indicate if action is in progress
 int actionOne = 0;    // To 'remember' than an action is in progress
 int btnState = 0;     // To get two states from a momentary button
 
 // Define which pins to use for different actions
-int btnOnePin = 5;    // Pin for first button
+int wmTriggerPin = D8;
+int btnOnePin = D5;    // Pin for first button
 
-// Uncomment next line to use built in LED on NodeMCU (which is D4)
-// #define LED_BUILTIN D4
+// Uncomment next line to use built in LED on NodeMCU/Wemos/ESP8266 (which is D4)
+#define LED_BUILTIN D4
+
+// Flag for saving data
+bool shouldSaveConfig = false;
 
 
 /*
@@ -62,80 +106,88 @@ void setup() {
   // Setup Arduino IDE serial monitor for "debugging"
   Serial.begin(115200);
 
+  // ------------------------------------------------------------
+  // Pin settings
+  
   // Define build-in LED pin as output
   pinMode(LED_BUILTIN, OUTPUT);
 
   // Set button pin
   pinMode(btnOnePin, INPUT);
 
+  // Set trigger pin
+  pinMode(wmTriggerPin, INPUT_PULLUP);
+
+  // ------------------------------------------------------------
+  // Get configuration from file (if it exists)
+  // TBD
+
+  // ------------------------------------------------------------
+  // Convert char to other variable types
+  deviceID = String(cfgDeviceId);
+  deviceName = String(cfgDeviceName);
+
+  node01Name = String(cfgNode01Name);
+  node01Prop01Name = String(cfgNode01Prop01Name);
+  node01Prop02Name = String(cfgNode01Prop02Name);
+  special01 = String(cfgSpecial01);
+  special02 = String(cfgSpecial02);
+  mqttRetry = atoi(cfgMqttRetry);
+
+  // ------------------------------------------------------------
   // Assemble topics to subscribe and publish to
-  if (cccCLEES == "1") {
-    cccCategory = "clees";
-    subTopic[0] = cccCategory+"/"+cccModule+"/cmd/turnout/"+cccObject;
-    pubTopic[0] = cccCategory+"/"+cccModule+"/rpt/turnout"+cccObject;
-  } else {
-    subTopic[0] = "mmrc/"+cccModule+"/"+cccObject+"/"+cccCategory+"/turnout/cmd";
-    subTopic[1] = "mmrc/"+cccModule+"/"+cccObject+"/"+cccCategory+"/button/cmd";
-    pubTopic[0] = "mmrc/"+cccModule+"/"+cccObject+"/"+cccCategory+"/turnout/rpt";
- }
+
+  // Subscribe
+  subTopic[0] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01+"/set";
+
+  // Publish - device
+  pubTopic[0] = "mmrc/"+deviceID+"/$name";
+  pubTopicContent[0] = deviceName;
+  pubTopic[1] = "mmrc/"+deviceID+"/$nodes";
+  pubTopicContent[1] = node01Id;
+
+  // Publish - node 01
+  pubTopic[2] = "mmrc/"+deviceID+"/"+node01Id+"/$name";
+  pubTopicContent[2] = node01Name;
+  pubTopic[3] = "mmrc/"+deviceID+"/"+node01Id+"/$type";
+  pubTopicContent[3] = node01Type;
+  pubTopic[4] = "mmrc/"+deviceID+"/"+node01Id+"/$properties";
+  pubTopicContent[4] = node01Prop01+","+node01Prop02;
+  
+  // Publish - node 01 - property 01
+  pubTopic[5] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01+"/$name";
+  pubTopicContent[5] = node01Prop01Name;
+  pubTopic[6] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01+"/$datatype";
+  pubTopicContent[6] = node01Prop01Datatype;
+
+  // Publish - node 01 - property 02
+  pubTopic[7] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop02+"/$name";
+  pubTopicContent[7] = node01Prop02Name;
+  pubTopic[8] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop02+"/$datatype";
+  pubTopicContent[8] = node01Prop02Datatype;
+
+  // Other used publish topics
+  pubTopicOne = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01;
+  pubTopicDeviceState = "mmrc/"+deviceID+"/$state";;
 
   // Unique name for this client
-  if (cccCLEES == "1") {
-    clientID = "CLEES "+cccModule;
-  } else {
-    clientID = "MMRC "+cccModule;
-  }
+  clientID = strcat("MMRC ",cfgDeviceId);
 
-  // Connect to wifi network
-  WiFiManager wifiManager;
-
-  //first parameter is name of access point, second is the password
-  wifiManager.autoConnect("AP-NAME", "AP-PASSWORD");
-
-//  wifiConnect();
-  delay(1000);
-
+  // ------------------------------------------------------------
   // Connect to MQTT broker and define function to handle callbacks
-  client.setServer(mqttBrokerIP, 1883);
+  delay(2000);    // Wait for WifiManager to start network connection
+  int mqttPort = atoi(cfgMqttPort);
+  client.setServer(cfgMqttServer, mqttPort);
   client.setCallback(mqttCallback);
 
 }
 
-
-/**
- * Connects to WiFi and prints out connection information
+/*
+ *  Callback to notifying of the need to save configuration
  */
-void wifiConnect() {
-  char tmpID[clientID.length()];
-  delay(200);
-
-   // Convert String to char* for the client.subribe() function to work
-  clientID.toCharArray(tmpID, clientID.length()+1);
-
-  // Connect to WiFi
-  Serial.println();
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.print(ssid);
-  WiFi.hostname(tmpID);
-  WiFi.begin(ssid, password);
- 
-  // Wait for connection
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  Serial.println("WiFi connected");
- 
-  // Print connection information
-  Serial.print("Client hostname: ");
-  Serial.println(WiFi.hostname());
-  Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("MAC address: ");
-  Serial.println(WiFi.macAddress());
-  Serial.println("---");
+void saveConfigCallback () {
+  Serial.println("Should save config");
+  shouldSaveConfig = true;
 }
 
 
@@ -144,39 +196,51 @@ void wifiConnect() {
  */
 void mqttConnect() {
   char tmpTopic[254];
-  char tmpID[clientID.length()];
+//  char tmpID[clientID.length()];
   
   // Convert String to char* for the client.subribe() function to work
-  clientID.toCharArray(tmpID, clientID.length()+1);
+//  clientID.toCharArray(tmpID, clientID.length()+1);
 
   // Loop until we're reconnected
   while (!client.connected()) {
-  Serial.print("MQTT connection...");
-  // Attempt to connect
-  if (client.connect(tmpID)) {
-    Serial.println("connected");
-    Serial.print("MQTT client id: ");
-    Serial.println(tmpID);
+    Serial.print("MQTT connection...");
+    // Attempt to connect
+    if (client.connect(clientID)) {
+      Serial.println("connected");
+      Serial.print("MQTT client id: ");
+      Serial.println(clientID);
 
-    // Subscribe to all topics
-    Serial.println("Subscribing to:");
-    for (int i=0; i < nbrTopics; i++){
-      // Convert String to char* for the client.subribe() function to work
-      subTopic[i].toCharArray(tmpTopic, subTopic[i].length()+1);
+      // Subscribe to all topics
+      Serial.println("Subscribing to:");
+      for (int i=0; i < nbrSubTopics; i++){
+        // Convert String to char* for the client.subribe() function to work
+        subTopic[i].toCharArray(tmpTopic, subTopic[i].length()+1);
+  
+        // ... print topic
+        Serial.print(" - ");
+        Serial.println(tmpTopic);
 
-      // ... print topic
-      Serial.print(" - ");
-      Serial.println(tmpTopic);
+        //   ... and subscribe to topic
+        client.subscribe(tmpTopic);
+      }
+    } else {
+       // Count number of connection tries
+      mqttRetry += 1;
 
-      // ... and subscribe to topic
-      client.subscribe(tmpTopic);
-    }
-  } else {
-    Serial.print("failed, rc=");
-    Serial.print(client.state());
-    Serial.println(" try again in 5 seconds");
-    // Wait 5 seconds before retrying
-    delay(5000);
+      // More than 5 tries, start configuration portal
+      if (mqttRetry > 5){
+       Serial.println("failed, starting config portal");
+        mqttRetry = 0;
+        configPortal();
+      } else {
+       Serial.print("failed no=");
+       Serial.print(mqttRetry);
+       Serial.print(", rc=");
+       Serial.print(client.state());
+       Serial.println(", try again in 5 seconds");
+       // Wait 5 seconds before retrying
+       delay(5000);
+      }
     }
   }
   Serial.println("---");
@@ -223,12 +287,12 @@ void mqttResolver(String sbTopic, String sbPayload) {
     if (sbPayload == "0") {
       // Turn LED on and report back (via MQTT)
       digitalWrite(LED_BUILTIN, HIGH);
-      mqttPublish(pubTopic[0], "0");
+      mqttPublish(pubTopicOne, "0");
     }
     if (sbPayload == "1") {
       // Turn LED off and don't report back (via MQTT)
       digitalWrite(LED_BUILTIN, LOW);
-      mqttPublish(pubTopic[0], "1");
+      mqttPublish(pubTopicOne, "1");
     }
   }
 
@@ -262,6 +326,85 @@ void mqttPublish(String pbTopic, String pbPayload) {
 
 }
 
+/*
+ * Show WifiManager configuration portal
+ */
+void configPortal() {
+
+  // WiFiManagerlocal intialization. Once its business is done, there is no need to keep it around
+  WiFiManager wifiManager;
+
+  // Reset settings - for testing only!
+  //wifiManager.resetSettings();
+
+  // Sets timeout until configuration portal gets turned off
+  //wifiManager.setTimeout(300);
+
+  // Make additional MQTT configuration
+  WiFiManagerParameter wm_mqtt_head("<br><strong>MQTT configuration</strong>");
+  WiFiManagerParameter wm_mqtt_server("brokerIp", "MQTT broker IP", cfgMqttServer, 20);
+  WiFiManagerParameter wm_mqtt_port("brokerPort", "MQTT port no", cfgMqttPort, 6);
+  WiFiManagerParameter wm_mqtt_retry("brokerRetry", "MQTT retry no", cfgMqttRetry, 6);
+  wifiManager.addParameter(&wm_mqtt_head);
+  wifiManager.addParameter(&wm_mqtt_server);
+  wifiManager.addParameter(&wm_mqtt_port);
+  wifiManager.addParameter(&wm_mqtt_retry);
+
+  // Make additional Device configuration
+  WiFiManagerParameter wm_device_head("<br><br><strong>Device configuration</strong>");
+  WiFiManagerParameter wm_device_id("deviceId", "Device ID", cfgDeviceId, 40);
+  WiFiManagerParameter wm_device_name("deviceName", "Device name", cfgDeviceName, 40);
+  wifiManager.addParameter(&wm_device_head);
+  wifiManager.addParameter(&wm_device_id);
+  wifiManager.addParameter(&wm_device_name);
+
+  // Make additional Node 01 configuration
+  WiFiManagerParameter wm_node01_head("<br><br><strong>Node configuration</strong>");
+  WiFiManagerParameter wm_node01_name("node01Name", "Node name", cfgNode01Name, 40);
+  WiFiManagerParameter wm_node01_prop01_name("node01Prop01Name", "First property name", cfgNode01Prop01Name, 40);
+  WiFiManagerParameter wm_node01_prop02_name("node01Prop02Name", "Second property name", cfgNode01Prop02Name, 40);
+  wifiManager.addParameter(&wm_node01_head);
+  wifiManager.addParameter(&wm_node01_name);
+  wifiManager.addParameter(&wm_node01_prop01_name);
+  wifiManager.addParameter(&wm_node01_prop02_name);
+
+  // Make other additional configuration
+  WiFiManagerParameter wm_special_head("<br><br><strong>Other configuration</strong>");
+  WiFiManagerParameter wm_special_01("special01", "Special number 1", cfgSpecial01, 5);
+  WiFiManagerParameter wm_special_02("special02", "Special number 2", cfgSpecial02, 5);
+  wifiManager.addParameter(&wm_special_head);
+  wifiManager.addParameter(&wm_special_01);
+  wifiManager.addParameter(&wm_special_02);
+
+  // WITHOUT THIS THE AP DOES NOT SEEM TO WORK PROPERLY WITH SDK 1.5 , update to at least 1.5.1
+  //WiFi.mode(WIFI_STA);
+
+   // Start AccessPoint "clientID" with configuration portal
+  if (!wifiManager.startConfigPortal(clientID, "1234")) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+
+    // Reset and try again
+    ESP.reset();
+    delay(5000);
+  }
+
+  // If you get here you have connected to the WiFi
+  Serial.println("connected...yeey :)");
+
+  // Read updated configuration
+  strcpy(cfgMqttServer, wm_mqtt_server.getValue());
+  strcpy(cfgMqttPort, wm_mqtt_port.getValue());
+  strcpy(cfgMqttRetry, wm_mqtt_retry.getValue());
+  // TDB
+
+  // Save the configuration to FS
+  if (shouldSaveConfig) {
+  // TBD  
+  }
+
+}
+
 
 void loop()
 {
@@ -273,6 +416,13 @@ void loop()
   // Wait for incoming messages
   client.loop();
 
+
+  // Check if we want to start the WifiManager configuration portal
+  if (digitalRead(wmTriggerPin) == HIGH) {
+    configPortal();
+  }
+
+
   // Check for button press
   int btnOnePress = digitalRead(btnOnePin);
   if (btnOnePress == LOW && actionOne == 0) {
@@ -282,9 +432,9 @@ void loop()
     // Publish button press
     btnState = 1-btnState;    // Change state of Action
     if (btnState == 0) {
-        mqttPublish(subTopic[0], "1");
+        mqttPublish(pubTopicOne, "1");
       } else {
-        mqttPublish(subTopic[0], "0");
+        mqttPublish(pubTopicOne, "0");
       }
     
     // Action 1 is executing, new actions forbidden
