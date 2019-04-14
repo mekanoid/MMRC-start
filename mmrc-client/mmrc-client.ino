@@ -12,39 +12,42 @@
 //    (at your option) any later version.
 //
 // -----------------------------------------------------------
-#include <ESP8266WiFi.h>
-#include <PubSubClient.h>
-
-#include <DNSServer.h>            // Local DNS server used for redirecting all requests to the configuration portal
-#include <ESP8266WebServer.h>     // Local web server used to serve the configuration portal
-#include <WiFiManager.h>
-
-#include "MMRCsettings.h"
+#include <PubSubClient.h>     // Library to handle MQTT communication
+#include <IotWebConf.h>       // Library to take care of wifi connection & client settings
+#include "MMRCsettings.h"     // Some of the MMRC client settings
 
 WiFiClient wifiClient;
-PubSubClient client(wifiClient);
+PubSubClient mqttClient(wifiClient);
 
 // ------------------------------------------------------------
-// Get values from MMRCsettings.h and define default configuration
+// Variables set on the configuration web page
+
+// Default string and number lenght
+#define STRING_LEN 32
+#define NUMBER_LEN 8
+
+// Access point configuration
+const char thingName[] = APNAME;                  // Initial AP name, used as SSID of the own Access Point
+const char wifiInitialApPassword[] = APPASSWORD;  // Initial password, used when it creates an own Access Point
 
 // Device configuration
-// If the same variable is found in "config.json" that value will be used instead
-char cfgMqttServer[20] = BROKERIP;
-char cfgMqttPort[6] = BROKERPORT;
-char cfgMqttRetry[6] = BROKERRETRY;
-char cfgDeviceId[40] = DEVICEID;
-char cfgDeviceName[40] = DEVICENAME;
+char cfgMqttServer[STRING_LEN];
+char cfgMqttPort[NUMBER_LEN];
+char cfgMqttRetry[NUMBER_LEN];
+char cfgDeviceId[STRING_LEN];
+char cfgDeviceName[STRING_LEN];
 
 // Node configuration
-// If the same variable is found in "config.json" that value will be used instead
-char cfgNode01Name[40] = NODE01NAME;
-char cfgNode01Prop01Name[40] = NODE01PROP01NAME;
-char cfgNode01Prop02Name[40] = NODE01PROP02NAME;
-char cfgSpecial01[5] = SPECIAL01;
-char cfgSpecial02[5] = SPECIAL02;
+char cfgNode01Name[STRING_LEN];
+char cfgNode01Prop01Name[STRING_LEN];
+char cfgNode01Prop02Name[STRING_LEN];
+char cfgSpecial01[NUMBER_LEN];
+char cfgSpecial02[NUMBER_LEN];
+
+// ------------------------------------------------------------
+// Get values from MMRCsettings.h
 
 // Node configuration
-// Will NOT be overwritten by "config.json"
 String node01Id = NODE01ID;
 String node01Type = NODE01TYPE;
 String node01Prop01 = NODE01PROP01;
@@ -78,25 +81,62 @@ String pubTopicContent[nbrPubTopics];
 String pubTopicOne;
 String pubTopicDeviceState;
 
+
+// ------------------------------------------------------------
+// IotWebConfig variables
+
+// Indicate if it is time to reset the client or connect to MQTT
+boolean needMqttConnect = false;
+// boolean needReset = false;
+
+// When CONFIG_PIN is pulled to ground on startup, the client will use the initial
+// password to buld an AP. (E.g. in case of lost password)
+#define CONFIG_PIN D2
+
+// Status indicator pin.
+// First it will light up (kept LOW), on Wifi connection it will blink
+// and when connected to the Wifi it will turn off (kept HIGH).
+#define STATUS_PIN LED_BUILTIN
+
+// Callback method declarations
+void configSaved();
+
+// 
+DNSServer dnsServer;
+WebServer server(80);
+IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
+
+// ------------------------------------------------------------
+// Define settings to show up on configuration web page
+
+// Add your own configuration - MQTT
+IotWebConfParameter webMqttServer = IotWebConfParameter("MQTT IP-adress", "mqttServer", cfgMqttServer, STRING_LEN);
+IotWebConfParameter webMqttPort = IotWebConfParameter("MQTT-port", "mqttPort", cfgMqttPort, NUMBER_LEN);
+
+// Add your own configuration - Device
+IotWebConfParameter webDeviceId = IotWebConfParameter("Enhetens unika id", "deviceId", cfgDeviceId, STRING_LEN);
+IotWebConfParameter webDeviceName = IotWebConfParameter("Enhetens namn", "deviceName", cfgDeviceName, STRING_LEN);
+
+// Add your own configuration - Node
+IotWebConfParameter webNode01Name = IotWebConfParameter("Funktionens namn", "node01Name", cfgNode01Name, STRING_LEN);
+IotWebConfParameter webNode01Prop01Name = IotWebConfParameter("Egenskapens namn", "node01Prop01Name", cfgNode01Prop01Name, STRING_LEN);
+
+// The next row does seem to cause compilation error on a Wemos D1 mini clone
+// IotWebConfSeparator separator1 = IotWebConfSeparator("Test separator");
+
+
 // ------------------------------------------------------------
 // Other variables
 
-// Variables for client info
-char* clientID;      // Id/name for this specific client, shown i MQTT and router
-  
 // Variables to indicate if action is in progress
 int actionOne = 0;    // To 'remember' than an action is in progress
 int btnState = 0;     // To get two states from a momentary button
 
 // Define which pins to use for different actions
-int wmTriggerPin = D8;
 int btnOnePin = D5;    // Pin for first button
 
 // Uncomment next line to use built in LED on NodeMCU/Wemos/ESP8266 (which is D4)
-#define LED_BUILTIN D4
-
-// Flag for saving data
-bool shouldSaveConfig = false;
+//#define LED_BUILTIN D4
 
 
 /*
@@ -105,6 +145,8 @@ bool shouldSaveConfig = false;
 void setup() {
   // Setup Arduino IDE serial monitor for "debugging"
   Serial.begin(115200);
+  Serial.println();
+  Serial.println("Starting setup");
 
   // ------------------------------------------------------------
   // Pin settings
@@ -115,18 +157,52 @@ void setup() {
   // Set button pin
   pinMode(btnOnePin, INPUT);
 
-  // Set trigger pin
-  pinMode(wmTriggerPin, INPUT_PULLUP);
-
   // ------------------------------------------------------------
-  // Get configuration from file (if it exists)
-  // TBD
+  // IotWebConfig start
+  Serial.print("IotWebConf start...");
+
+  // Adding up items to show on config web page
+  iotWebConf.addParameter(&webMqttServer);
+  iotWebConf.addParameter(&webMqttPort);
+  iotWebConf.addParameter(&webDeviceId);
+  iotWebConf.addParameter(&webDeviceName);
+  iotWebConf.addParameter(&webNode01Name);
+  iotWebConf.addParameter(&webNode01Prop01Name);
+  iotWebConf.getApTimeoutParameter()->visible = true; // Show/set AP timeout at start
+
+//  iotWebConf.setStatusPin(STATUS_PIN);
+  iotWebConf.setConfigPin(CONFIG_PIN);
+  Serial.println();
+  Serial.print("Config pin: ");
+  Serial.println(CONFIG_PIN);
+
+  // -- Initializing the configuration
+  iotWebConf.init();
+
+/*
+  // Setting default configuration
+  boolean validConfig = iotWebConf.init();
+  if (!validConfig)
+  {
+    // Set configuration default values
+    mqttServerValue[0] = '\0';
+    mqttUserNameValue[0] = '\0';
+    mqttUserPasswordValue[0] = '\0';
+  }
+*/
+
+  // Set up required URL handlers for the config web pages
+  server.on("/", handleRoot);
+  server.on("/config", []{ iotWebConf.handleConfig(); });
+  server.onNotFound([](){ iotWebConf.handleNotFound(); });
+
+  Serial.println("IotWebConf start...done");
+  Serial.print("Assemble topics...");
 
   // ------------------------------------------------------------
   // Convert char to other variable types
   deviceID = String(cfgDeviceId);
   deviceName = String(cfgDeviceName);
-
   node01Name = String(cfgNode01Name);
   node01Prop01Name = String(cfgNode01Prop01Name);
   node01Prop02Name = String(cfgNode01Prop02Name);
@@ -170,50 +246,41 @@ void setup() {
   pubTopicOne = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01;
   pubTopicDeviceState = "mmrc/"+deviceID+"/$state";;
 
-  // Unique name for this client
-  clientID = strcat("MMRC ",cfgDeviceId);
+  Serial.println("done");
+  Serial.print("Prepare MQTT...");
 
   // ------------------------------------------------------------
-  // Connect to MQTT broker and define function to handle callbacks
-  delay(2000);    // Wait for WifiManager to start network connection
+  // Prepare MQTT broker and define function to handle callbacks
+  delay(2000);    // Wait for IotWebServer to start network connection
   int mqttPort = atoi(cfgMqttPort);
-  client.setServer(cfgMqttServer, mqttPort);
-  client.setCallback(mqttCallback);
+  mqttClient.setServer(cfgMqttServer, mqttPort);
+  mqttClient.setCallback(mqttCallback);
 
-}
-
-/*
- *  Callback to notifying of the need to save configuration
- */
-void saveConfigCallback () {
-  Serial.println("Should save config");
-  shouldSaveConfig = true;
+  Serial.println("done");
+  Serial.println("Setup finished");
 }
 
 
 /**
  * (Re)connects to MQTT broker and subscribes to one or more topics
  */
-void mqttConnect() {
+boolean mqttConnect() {
   char tmpTopic[254];
-//  char tmpID[clientID.length()];
-  
-  // Convert String to char* for the client.subribe() function to work
-//  clientID.toCharArray(tmpID, clientID.length()+1);
 
   // Loop until we're reconnected
-  while (!client.connected()) {
+  while (!mqttClient.connected()) {
     Serial.print("MQTT connection...");
+
     // Attempt to connect
-    if (client.connect(clientID)) {
+    if (mqttClient.connect(cfgDeviceId)) {
       Serial.println("connected");
       Serial.print("MQTT client id: ");
-      Serial.println(clientID);
+      Serial.println(cfgDeviceId);
 
       // Subscribe to all topics
       Serial.println("Subscribing to:");
       for (int i=0; i < nbrSubTopics; i++){
-        // Convert String to char* for the client.subribe() function to work
+        // Convert String to char* for the mqttClient.subribe() function to work
         subTopic[i].toCharArray(tmpTopic, subTopic[i].length()+1);
   
         // ... print topic
@@ -221,37 +288,33 @@ void mqttConnect() {
         Serial.println(tmpTopic);
 
         //   ... and subscribe to topic
-        client.subscribe(tmpTopic);
+        mqttClient.subscribe(tmpTopic);
       }
     } else {
        // Count number of connection tries
       mqttRetry += 1;
 
-      // More than 5 tries, start configuration portal
+      // More than 5 tries, then start configuration portal (NOT TESTED!)
       if (mqttRetry > 5){
        Serial.println("failed, starting config portal");
-        mqttRetry = 0;
-        configPortal();
+       mqttRetry = 0;
+       return false;
       } else {
        Serial.print("failed no=");
        Serial.print(mqttRetry);
        Serial.print(", rc=");
-       Serial.print(client.state());
+       Serial.print(mqttClient.state());
        Serial.println(", try again in 5 seconds");
        // Wait 5 seconds before retrying
        delay(5000);
       }
     }
   }
+  return true;
   Serial.println("---");
 
 }
 
-/**
- * Function to handle subscriptions
- */
-//void mqttSubscribe {
-//}
 
 /**
  * Function to handle MQTT messages sent to this device
@@ -286,32 +349,45 @@ void mqttResolver(String sbTopic, String sbPayload) {
     // Check message
     if (sbPayload == "0") {
       // Turn LED on and report back (via MQTT)
-      digitalWrite(LED_BUILTIN, HIGH);
+      setLED(0);
       mqttPublish(pubTopicOne, "0");
     }
     if (sbPayload == "1") {
       // Turn LED off and don't report back (via MQTT)
-      digitalWrite(LED_BUILTIN, LOW);
+      setLED(1);
       mqttPublish(pubTopicOne, "1");
     }
   }
-
 }
 
+
+/*
+ * Function to turn LED on or off
+ */
+void setLED (int light) {
+
+    // Turn LED on of off
+    if (light == 0) {
+      digitalWrite(LED_BUILTIN, HIGH);
+    } else {
+      digitalWrite(LED_BUILTIN, LOW);
+    }
+
+}
 
 /**
  * Publish messages to MQTT broker 
  */
 void mqttPublish(String pbTopic, String pbPayload) {
 
-  // Convert String to char* for the client.publish() function to work
+  // Convert String to char* for the mqttClient.publish() function to work
   char msg[pbPayload.length()+1];
   pbPayload.toCharArray(msg, pbPayload.length()+1);
   char tpc[pbTopic.length()+1];
   pbTopic.toCharArray(tpc, pbTopic.length()+1);
 
   // Report back to pubTopic[]
-  int check = client.publish(tpc, msg);
+  int check = mqttClient.publish(tpc, msg);
 
   // TODO check "check" integer to see if all went ok
 
@@ -327,100 +403,27 @@ void mqttPublish(String pbTopic, String pbPayload) {
 }
 
 /*
- * Show WifiManager configuration portal
+ * Main program loop
  */
-void configPortal() {
-
-  // WiFiManagerlocal intialization. Once its business is done, there is no need to keep it around
-  WiFiManager wifiManager;
-
-  // Reset settings - for testing only!
-  //wifiManager.resetSettings();
-
-  // Sets timeout until configuration portal gets turned off
-  //wifiManager.setTimeout(300);
-
-  // Make additional MQTT configuration
-  WiFiManagerParameter wm_mqtt_head("<br><strong>MQTT configuration</strong>");
-  WiFiManagerParameter wm_mqtt_server("brokerIp", "MQTT broker IP", cfgMqttServer, 20);
-  WiFiManagerParameter wm_mqtt_port("brokerPort", "MQTT port no", cfgMqttPort, 6);
-  WiFiManagerParameter wm_mqtt_retry("brokerRetry", "MQTT retry no", cfgMqttRetry, 6);
-  wifiManager.addParameter(&wm_mqtt_head);
-  wifiManager.addParameter(&wm_mqtt_server);
-  wifiManager.addParameter(&wm_mqtt_port);
-  wifiManager.addParameter(&wm_mqtt_retry);
-
-  // Make additional Device configuration
-  WiFiManagerParameter wm_device_head("<br><br><strong>Device configuration</strong>");
-  WiFiManagerParameter wm_device_id("deviceId", "Device ID", cfgDeviceId, 40);
-  WiFiManagerParameter wm_device_name("deviceName", "Device name", cfgDeviceName, 40);
-  wifiManager.addParameter(&wm_device_head);
-  wifiManager.addParameter(&wm_device_id);
-  wifiManager.addParameter(&wm_device_name);
-
-  // Make additional Node 01 configuration
-  WiFiManagerParameter wm_node01_head("<br><br><strong>Node configuration</strong>");
-  WiFiManagerParameter wm_node01_name("node01Name", "Node name", cfgNode01Name, 40);
-  WiFiManagerParameter wm_node01_prop01_name("node01Prop01Name", "First property name", cfgNode01Prop01Name, 40);
-  WiFiManagerParameter wm_node01_prop02_name("node01Prop02Name", "Second property name", cfgNode01Prop02Name, 40);
-  wifiManager.addParameter(&wm_node01_head);
-  wifiManager.addParameter(&wm_node01_name);
-  wifiManager.addParameter(&wm_node01_prop01_name);
-  wifiManager.addParameter(&wm_node01_prop02_name);
-
-  // Make other additional configuration
-  WiFiManagerParameter wm_special_head("<br><br><strong>Other configuration</strong>");
-  WiFiManagerParameter wm_special_01("special01", "Special number 1", cfgSpecial01, 5);
-  WiFiManagerParameter wm_special_02("special02", "Special number 2", cfgSpecial02, 5);
-  wifiManager.addParameter(&wm_special_head);
-  wifiManager.addParameter(&wm_special_01);
-  wifiManager.addParameter(&wm_special_02);
-
-  // WITHOUT THIS THE AP DOES NOT SEEM TO WORK PROPERLY WITH SDK 1.5 , update to at least 1.5.1
-  //WiFi.mode(WIFI_STA);
-
-   // Start AccessPoint "clientID" with configuration portal
-  if (!wifiManager.startConfigPortal(clientID, "1234")) {
-    Serial.println("failed to connect and hit timeout");
-    delay(3000);
-
-    // Reset and try again
-    ESP.reset();
-    delay(5000);
-  }
-
-  // If you get here you have connected to the WiFi
-  Serial.println("connected...yeey :)");
-
-  // Read updated configuration
-  strcpy(cfgMqttServer, wm_mqtt_server.getValue());
-  strcpy(cfgMqttPort, wm_mqtt_port.getValue());
-  strcpy(cfgMqttRetry, wm_mqtt_retry.getValue());
-  // TDB
-
-  // Save the configuration to FS
-  if (shouldSaveConfig) {
-  // TBD  
-  }
-
-}
-
-
 void loop()
 {
+
   // Check connection to the MQTT broker. If no connection, try to reconnect
-  if (!client.connected()) {
-    mqttConnect();
+  if (needMqttConnect) {
+    if (mqttConnect()) {
+      needMqttConnect = false;
     }
-
-  // Wait for incoming messages
-  client.loop();
-
-
-  // Check if we want to start the WifiManager configuration portal
-  if (digitalRead(wmTriggerPin) == HIGH) {
-    configPortal();
   }
+  else if ((iotWebConf.getState() == IOTWEBCONF_STATE_ONLINE) && (!mqttClient.connected())) {
+    Serial.println("MQTT reconnect");
+    mqttConnect();
+  }
+
+  // Wait for incoming MQTT messages
+  mqttClient.loop();
+
+  // Check for IotWebConfig actions (should be called as frequently as possible)
+  iotWebConf.doLoop();
 
 
   // Check for button press
@@ -432,14 +435,52 @@ void loop()
     // Publish button press
     btnState = 1-btnState;    // Change state of Action
     if (btnState == 0) {
-        mqttPublish(pubTopicOne, "1");
-      } else {
-        mqttPublish(pubTopicOne, "0");
-      }
-    
-    // Action 1 is executing, new actions forbidden
-    actionOne = 1;
-
+      actionOne = 1;                  // Action 1 is executing, new actions forbidden
+      setLED(1);                      // Turn on LED
+      mqttPublish(pubTopicOne, "1");  // Publish new LED state
+    } else {
+      actionOne = 1;                  // Action 1 is executing, new actions forbidden
+      setLED(0);                      // Turn on LED
+      mqttPublish(pubTopicOne, "0");  // Publish new LED state
     }
+  }
 
+}
+
+
+/*
+ * Function to show AP web start page
+ */
+void handleRoot()
+{
+  // -- Let IotWebConf test and handle captive portal requests.
+  if (iotWebConf.handleCaptivePortal())
+  {
+    // -- Captive portal request were already served.
+    return;
+  }
+  String page = "<!DOCTYPE html><html lang=\"en\"><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1, user-scalable=no\"/>";
+  page += "<title>MMRC-inst&auml;llningar</title></head><body>";
+  page += "<h1>Inst&auml;llningar</h1>";
+  page += "<p>V&auml;lkommen till MMRC-enheten med namn: '";
+  page += cfgDeviceId;
+  page += "'</p>";
+  page += "P&aring; sidan <a href='config'>Inst&auml;llningar</a> kan du best&auml;mma hur just denna MMRC-klient ska fungera.";
+
+  page += "<p>M&ouml;jligheten att &auml;ndra dessa inst&auml;llningar &auml;r alltid tillg&auml;nglig de f&ouml;rsta ";
+  page += "30";
+  page += " sekunderna efter start av enheten.";
+
+  page += "</body></html>\n";
+
+  server.send(200, "text/html", page);
+}
+
+
+/*
+ *  Function beeing called when wifi connection is up and running
+ */
+void wifiConnected() {
+  // We are ready to start the MQTT connection
+  needMqttConnect = true;
 }
