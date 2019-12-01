@@ -11,11 +11,16 @@
 //    Foundation, either version 3 of the License, or
 //    (at your option) any later version.
 //
+//     Uses the following libraries
+//      PubSubClient by Nick O'Leary - https://pubsubclient.knolleary.net/
+//      IotWebConf by Balazs Kelemen - https://github.com/prampec/IotWebConf
+//  
 // -----------------------------------------------------------
 #include <PubSubClient.h>     // Library to handle MQTT communication
 #include <IotWebConf.h>       // Library to take care of wifi connection & client settings
 #include "MMRCsettings.h"     // Some of the MMRC client settings
 
+// For the PubSubClient
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
@@ -144,7 +149,7 @@ int btnOnePin = D5;    // Pin for first button
  */
 void setup() {
   // Setup Arduino IDE serial monitor for "debugging"
-  Serial.begin(115200);
+  Serial.begin(9600);
   Serial.println();
   Serial.println("Starting setup");
 
