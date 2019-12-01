@@ -56,7 +56,7 @@ const int nbrSubTopics = 1;
 String subTopic[nbrSubTopics];
 
 // Variable for topics to publish to
-const int nbrPubTopics = 7;
+const int nbrPubTopics = 9;
 String pubTopic[nbrPubTopics];
 String pubTopicContent[nbrPubTopics];
 
@@ -212,14 +212,14 @@ void setup() {
   // Publish - node 01 - property 01
   pubTopic[5] = "mmrc/"+deviceID+"/button01/push/$name";
   pubTopicContent[5] = "Knapptryck";
-  pubTopic[6] = "mmrc/"+deviceID+"/button/push/$datatype";
+  pubTopic[6] = "mmrc/"+deviceID+"/button01/push/$datatype";
   pubTopicContent[6] = "string";
 
   // Publish - node 01 - property 02
-  pubTopic[5] = "mmrc/"+deviceID+"/button01/status/$name";
-  pubTopicContent[5] = "Lysdiod";
-  pubTopic[6] = "mmrc/"+deviceID+"/button/status/$datatype";
-  pubTopicContent[6] = "string";
+  pubTopic[7] = "mmrc/"+deviceID+"/button01/status/$name";
+  pubTopicContent[7] = "Lysdiod";
+  pubTopic[8] = "mmrc/"+deviceID+"/button01/status/$datatype";
+  pubTopicContent[8] = "string";
 
   // Other used publish topics
   pubLedTopic = "mmrc/"+deviceID+"/button01/status";
@@ -387,7 +387,7 @@ void btnPressed () {
 
 
 // --------------------------------------------------------------------------------------------------
-// Main program loop
+//  Main program loop
 // --------------------------------------------------------------------------------------------------
 void loop()
 {
