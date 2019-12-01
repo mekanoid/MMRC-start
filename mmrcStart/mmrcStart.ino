@@ -78,13 +78,14 @@ const int nbrSubTopics = 1;
 String subTopic[nbrSubTopics];
 
 // Variable for topics to publish to
-const int nbrPubTopics = 9;
+const int nbrPubTopics = 7;
 String pubTopic[nbrPubTopics];
 String pubTopicContent[nbrPubTopics];
 
 // Often used topics
-String pubTopicOne;
-String pubTopicDeviceState;
+String pubPushTopic;
+String pubPushContent;
+String pubDeviceStateTopic;
 
 
 // ------------------------------------------------------------
@@ -222,37 +223,32 @@ void setup() {
   if (debug == 1) {Serial.println(dbText+"Topics setup");}
 
   // Subscribe
-  subTopic[0] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01+"/set";
+  subTopic[0] = "mmrc/"+deviceID+"/button01/push/set";
 
   // Publish - device
   pubTopic[0] = "mmrc/"+deviceID+"/$name";
   pubTopicContent[0] = deviceName;
   pubTopic[1] = "mmrc/"+deviceID+"/$nodes";
-  pubTopicContent[1] = node01Id;
+  pubTopicContent[1] = "button01";
 
   // Publish - node 01
-  pubTopic[2] = "mmrc/"+deviceID+"/"+node01Id+"/$name";
-  pubTopicContent[2] = node01Name;
-  pubTopic[3] = "mmrc/"+deviceID+"/"+node01Id+"/$type";
-  pubTopicContent[3] = node01Type;
-  pubTopic[4] = "mmrc/"+deviceID+"/"+node01Id+"/$properties";
-  pubTopicContent[4] = node01Prop01+","+node01Prop02;
+  pubTopic[2] = "mmrc/"+deviceID+"/button01/$name";
+  pubTopicContent[2] = "Knapp 1";
+  pubTopic[3] = "mmrc/"+deviceID+"/button01/$type";
+  pubTopicContent[3] = "pushbutton";
+  pubTopic[4] = "mmrc/"+deviceID+"/button01/$properties";
+  pubTopicContent[4] = "push";
   
   // Publish - node 01 - property 01
-  pubTopic[5] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01+"/$name";
-  pubTopicContent[5] = node01Prop01Name;
-  pubTopic[6] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01+"/$datatype";
-  pubTopicContent[6] = node01Prop01Datatype;
-
-  // Publish - node 01 - property 02
-  pubTopic[7] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop02+"/$name";
-  pubTopicContent[7] = node01Prop02Name;
-  pubTopic[8] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop02+"/$datatype";
-  pubTopicContent[8] = node01Prop02Datatype;
+  pubTopic[5] = "mmrc/"+deviceID+"/button01/push/$name";
+  pubTopicContent[5] = "Knapptryck";
+  pubTopic[6] = "mmrc/"+deviceID+"/button/push/$datatype";
+  pubTopicContent[6] = "string";
 
   // Other used publish topics
-  pubTopicOne = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01;
-  pubTopicDeviceState = "mmrc/"+deviceID+"/$state";;
+  pubPushTopic = "mmrc/"+deviceID+"/button01/push";
+  pubPushContent = "zero";
+  pubDeviceStateTopic = "mmrc/"+deviceID+"/$state";
 
 
   // ------------------------------------------------------------
@@ -273,13 +269,21 @@ void setup() {
  */
 boolean mqttConnect() {
   char tmpTopic[254];
-
+  char tmpContent[254];
+  char tmpID[deviceID.length()];    // For converting deviceID
+  char* tmpMessage = "lost";        // Status message in Last Will
+  
+  // Convert String to char* for last will message
+  deviceID.toCharArray(tmpID, deviceID.length()+1);
+  pubDeviceStateTopic.toCharArray(tmpTopic, pubDeviceStateTopic.length()+1);
+  
   // Loop until we're reconnected
   while (!mqttClient.connected()) {
   if (debug == 1) {Serial.print(dbText+"MQTT connection...");}
 
     // Attempt to connect
-    if (mqttClient.connect(cfgDeviceId)) {
+    // boolean connect (tmpID, pubDeviceStateTopic, willQoS, willRetain, willMessage)
+    if (mqttClient.connect(tmpID,tmpTopic,0,true,tmpMessage)) {
       if (debug == 1) {Serial.println("connected");}
       if (debug == 1) {Serial.print(dbText+"MQTT client id = ");}
       if (debug == 1) {Serial.println(cfgDeviceId);}
@@ -296,6 +300,24 @@ boolean mqttConnect() {
         //   ... and subscribe to topic
         mqttClient.subscribe(tmpTopic);
       }
+
+      // Publish to all topics
+      if (debug == 1) {Serial.println(dbText+"Publishing to:");}
+      for (int i=0; i < nbrPubTopics; i++){
+        // Convert String to char* for the mqttClient.publish() function to work
+        pubTopic[i].toCharArray(tmpTopic, pubTopic[i].length()+1);
+        pubTopicContent[i].toCharArray(tmpContent, pubTopicContent[i].length()+1);
+
+      // ... print topic
+        if (debug == 1) {Serial.print(dbText+" - "+tmpTopic);}
+        if (debug == 1) {Serial.print(" = ");}
+        if (debug == 1) {Serial.println(tmpContent);}
+
+      // ... and subscribe to topic
+      mqttClient.publish(tmpTopic, tmpContent);
+      
+      }
+      
     } else {
        // Count number of connection tries
       mqttRetry += 1;
@@ -317,6 +339,9 @@ boolean mqttConnect() {
       }
     }
   }
+
+  // Set device status to "ready"
+  mqttPublish(pubDeviceStateTopic, "ready");
   return true;
 
 }
@@ -356,12 +381,12 @@ void mqttResolver(String sbTopic, String sbPayload) {
     if (sbPayload == "0") {
       // Turn LED on and report back (via MQTT)
       setLED(0);
-      mqttPublish(pubTopicOne, "0");
+      mqttPublish(pubPushTopic, "0");
     }
     if (sbPayload == "1") {
       // Turn LED off and don't report back (via MQTT)
       setLED(1);
-      mqttPublish(pubTopicOne, "1");
+      mqttPublish(pubPushTopic, "1");
     }
   }
 }
@@ -443,11 +468,11 @@ void loop()
     if (btnState == 0) {
       actionOne = 1;                  // Action 1 is executing, new actions forbidden
       setLED(1);                      // Turn on LED
-      mqttPublish(pubTopicOne, "1");  // Publish new LED state
+      mqttPublish(pubPushTopic, "1");  // Publish new LED state
     } else {
       actionOne = 1;                  // Action 1 is executing, new actions forbidden
       setLED(0);                      // Turn on LED
-      mqttPublish(pubTopicOne, "0");  // Publish new LED state
+      mqttPublish(pubPushTopic, "0");  // Publish new LED state
     }
   }
 
