@@ -5,12 +5,18 @@
 #define APNAME "MMRC-start"
 #define APPASSWORD "mmrc1234"
 
-// Node one settings
-#define NODE01ID "button"
-#define NODE01TYPE "button"
-#define NODE01PROP01 "main"
-#define NODE01PROP01DATATYPE "string"
-#define NODE01PROP02 "slave"
-#define NODE01PROP02DATATYPE "string"
-#define SPECIAL01 "5"
-#define SPECIAL02 "10"
+// Define which pin to use for the pushbutton
+#define BUTTON_PIN D5
+
+// Defince which pin to use for LED output
+#define LED_PIN LED_BUILTIN
+
+// Configuration pin
+// When CONFIG_PIN is pulled to ground on startup, the client will use the initial
+// password to buld an AP. (E.g. in case of lost password)
+//#define CONFIG_PIN D2
+
+// Status indicator pin
+// First it will light up (kept LOW), on Wifi connection it will blink
+// and when connected to the Wifi it will turn off (kept HIGH).
+//#define STATUS_PIN LED_BUILTIN

@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 //
-//    MMRC client for controlling built-in LED
+//    MMRC client for controlling a LED
 //    Copyright (C) 2019 Peter Kindström
 //
 //    Code to use as a starting point for MMRC clients
@@ -15,16 +15,21 @@
 //      PubSubClient by Nick O'Leary - https://pubsubclient.knolleary.net/
 //      IotWebConf by Balazs Kelemen - https://github.com/prampec/IotWebConf
 //  
-// -----------------------------------------------------------
+// --------------------------------------------------------------------------------------------------
+// Include all libraries
 #include <PubSubClient.h>     // Library to handle MQTT communication
 #include <IotWebConf.h>       // Library to take care of wifi connection & client settings
+#include <EasyButton.h>       // Handle button presses
 #include "mmrcSettings.h"     // Some of the MMRC client settings
 
-// For the PubSubClient
+// Make objects for the PubSubClient
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
-// ------------------------------------------------------------
+// Make object for pushbutton
+EasyButton button(BUTTON_PIN, 100, false, true);
+
+// --------------------------------------------------------------------------------------------------
 // Variables set on the configuration web page
 
 // Default string and number lenght
@@ -38,39 +43,12 @@ const char wifiInitialApPassword[] = APPASSWORD;  // Initial password, used when
 // Device configuration
 char cfgMqttServer[STRING_LEN];
 char cfgMqttPort[NUMBER_LEN];
-char cfgMqttRetry[NUMBER_LEN];
+//char cfgMqttRetry[NUMBER_LEN];
 char cfgDeviceId[STRING_LEN];
 char cfgDeviceName[STRING_LEN];
 
-// Node configuration
-char cfgNode01Name[STRING_LEN];
-char cfgNode01Prop01Name[STRING_LEN];
-char cfgNode01Prop02Name[STRING_LEN];
-char cfgSpecial01[NUMBER_LEN];
-char cfgSpecial02[NUMBER_LEN];
 
-// ------------------------------------------------------------
-// Get values from MMRCsettings.h
-
-// Node configuration
-String node01Id = NODE01ID;
-String node01Type = NODE01TYPE;
-String node01Prop01 = NODE01PROP01;
-String node01Prop01Datatype = NODE01PROP01DATATYPE;
-String node01Prop02 = NODE01PROP02;
-String node01Prop02Datatype = NODE01PROP02DATATYPE;
-
-// Strings to be set after getting configuration from file
-String deviceID;
-String deviceName;
-String node01Name;
-String node01Prop01Name;
-String node01Prop02Name;
-String special01;
-String special02;
-int mqttRetry;
-
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------
 // Define topic variables
 
 // Variable for topics to subscribe to
@@ -83,36 +61,29 @@ String pubTopic[nbrPubTopics];
 String pubTopicContent[nbrPubTopics];
 
 // Often used topics
-String pubPushTopic;
-String pubPushContent;
+String pubBtnTopic;
+String pubBtnContent;
 String pubDeviceStateTopic;
 
+const byte NORETAIN = 0;
+const byte RETAIN = 1;
 
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------
 // IotWebConfig variables
 
 // Indicate if it is time to reset the client or connect to MQTT
 boolean needMqttConnect = false;
 // boolean needReset = false;
 
-// When CONFIG_PIN is pulled to ground on startup, the client will use the initial
-// password to buld an AP. (E.g. in case of lost password)
-#define CONFIG_PIN D2
-
-// Status indicator pin.
-// First it will light up (kept LOW), on Wifi connection it will blink
-// and when connected to the Wifi it will turn off (kept HIGH).
-#define STATUS_PIN LED_BUILTIN
-
 // Callback method declarations
 void configSaved();
 
-// 
+// Make objects for IotWebConf
 DNSServer dnsServer;
 WebServer server(80);
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
 
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------
 // Define settings to show up on configuration web page
 
 // Add your own configuration - MQTT
@@ -124,29 +95,27 @@ IotWebConfParameter webDeviceId = IotWebConfParameter("Enhetens unika id", "devi
 IotWebConfParameter webDeviceName = IotWebConfParameter("Enhetens namn", "deviceName", cfgDeviceName, STRING_LEN);
 
 // Add your own configuration - Node
-IotWebConfParameter webNode01Name = IotWebConfParameter("Funktionens namn", "node01Name", cfgNode01Name, STRING_LEN);
-IotWebConfParameter webNode01Prop01Name = IotWebConfParameter("Egenskapens namn", "node01Prop01Name", cfgNode01Prop01Name, STRING_LEN);
+//IotWebConfParameter webNode01Name = IotWebConfParameter("Funktionens namn", "node01Name", cfgNode01Name, STRING_LEN);
+//IotWebConfParameter webNode01Prop01Name = IotWebConfParameter("Egenskapens namn", "node01Prop01Name", cfgNode01Prop01Name, STRING_LEN);
 
 // The next row does seem to cause compilation error on a Wemos D1 mini clone
 // IotWebConfSeparator separator1 = IotWebConfSeparator("Test separator");
 
 
-// ------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------
 // Other variables
+
+// Strings to be set after getting configuration from file
+String deviceID;
+String deviceName;
 
 // Variables to indicate if action is in progress
 int actionOne = 0;    // To 'remember' than an action is in progress
 int btnState = 0;     // To get two states from a momentary button
 
-// Define which pins to use for different actions
-int btnOnePin = D5;    // Pin for first button
-
-// Uncomment next line to use built in LED on NodeMCU/Wemos/ESP8266 (which is D4)
-//#define LED_BUILTIN D4
-
 // Debug
 byte debug = 1;               // Set to "1" for debug messages in Serial monitor (9600 baud)
-String dbText = "Main   : ";  // Debug text
+String dbText = "Main   : ";  // Debug text. Occurs first in every debug output
 
 
 /*
@@ -157,16 +126,27 @@ void setup() {
   if (debug == 1) {Serial.begin(9600);Serial.println("");}
   if (debug == 1) {Serial.println(dbText+"Starting setup");}
 
-  // ------------------------------------------------------------
+  // ------------------------------------------------------------------------------------------------
   // Pin settings
   
   // Define build-in LED pin as output
-  pinMode(LED_BUILTIN, OUTPUT);
+  //  if (debug == 1) {Serial.println(dbText+"Config pin = "+CONFIG_PIN);}
+  pinMode(LED_PIN, OUTPUT);
 
-  // Set button pin
-  pinMode(btnOnePin, INPUT);
 
-  // ------------------------------------------------------------
+  // ------------------------------------------------------------------------------------------------
+  // Button start
+  if (debug == 1) {Serial.println(dbText+"Button setup");}
+  if (debug == 1) {Serial.println(dbText+"Button pin = "+BUTTON_PIN);}
+  pinMode(BUTTON_PIN, INPUT);
+
+  // Initialize the button
+  button.begin();
+
+  // Add the callback function to be called when the button is pressed
+  button.onPressed(btnPressed);
+  
+  // ------------------------------------------------------------------------------------------------
   // IotWebConfig start
   if (debug == 1) {Serial.println(dbText+"IotWebConf setup");}
 
@@ -175,8 +155,6 @@ void setup() {
   iotWebConf.addParameter(&webMqttPort);
   iotWebConf.addParameter(&webDeviceId);
   iotWebConf.addParameter(&webDeviceName);
-  iotWebConf.addParameter(&webNode01Name);
-  iotWebConf.addParameter(&webNode01Prop01Name);
   iotWebConf.getApTimeoutParameter()->visible = true; // Show/set AP timeout at start
 
 //  iotWebConf.setStatusPin(STATUS_PIN);
@@ -198,6 +176,9 @@ void setup() {
     mqttServerValue[0] = '\0';
     mqttUserNameValue[0] = '\0';
     mqttUserPasswordValue[0] = '\0';
+  } else {
+    deviceID = String(cfgDeviceId);
+    deviceName = String(cfgDeviceName);
   }
 */
 
@@ -207,18 +188,12 @@ void setup() {
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
 
 
-  // ------------------------------------------------------------
+  // ------------------------------------------------------------------------------------------------
   // Convert char to other variable types
   deviceID = String(cfgDeviceId);
   deviceName = String(cfgDeviceName);
-  node01Name = String(cfgNode01Name);
-  node01Prop01Name = String(cfgNode01Prop01Name);
-  node01Prop02Name = String(cfgNode01Prop02Name);
-  special01 = String(cfgSpecial01);
-  special02 = String(cfgSpecial02);
-  mqttRetry = atoi(cfgMqttRetry);
 
-  // ------------------------------------------------------------
+  // ------------------------------------------------------------------------------------------------
   // Assemble topics to subscribe and publish to
   if (debug == 1) {Serial.println(dbText+"Topics setup");}
 
@@ -246,12 +221,11 @@ void setup() {
   pubTopicContent[6] = "string";
 
   // Other used publish topics
-  pubPushTopic = "mmrc/"+deviceID+"/button01/push";
-  pubPushContent = "zero";
+  pubBtnTopic = "mmrc/"+deviceID+"/button01/push";
+  pubBtnContent = "zero";
   pubDeviceStateTopic = "mmrc/"+deviceID+"/$state";
 
-
-  // ------------------------------------------------------------
+  // ------------------------------------------------------------------------------------------------
   // Prepare MQTT broker and define function to handle callbacks
   if (debug == 1) {Serial.println(dbText+"MQTT setup");}
   delay(2000);    // Wait for IotWebServer to start network connection
@@ -308,40 +282,31 @@ boolean mqttConnect() {
         pubTopic[i].toCharArray(tmpTopic, pubTopic[i].length()+1);
         pubTopicContent[i].toCharArray(tmpContent, pubTopicContent[i].length()+1);
 
-      // ... print topic
+        // ... print topic
         if (debug == 1) {Serial.print(dbText+" - "+tmpTopic);}
         if (debug == 1) {Serial.print(" = ");}
         if (debug == 1) {Serial.println(tmpContent);}
 
-      // ... and subscribe to topic
-      mqttClient.publish(tmpTopic, tmpContent);
+        // ... and subscribe to topic
+        mqttClient.publish(tmpTopic, tmpContent, true);
       
       }
-      
+     
     } else {
-       // Count number of connection tries
-      mqttRetry += 1;
+      // Show why the connection failed
+      if (debug == 1) {Serial.print(dbText+"failed, rc=");}
+      if (debug == 1) {Serial.print(mqttClient.state());}
+      if (debug == 1) {Serial.println(", try again in 5 seconds");}
 
-      // More than 5 tries, then start configuration portal (NOT TESTED!)
-      if (mqttRetry > 5){
-        if (debug == 1) {Serial.println("failed, starting config portal");}
-        mqttRetry = 0;
-        return false;
-      } else {
-        if (debug == 1) {Serial.print(dbText+"failed no=");}
-        if (debug == 1) {Serial.print(mqttRetry);}
-        if (debug == 1) {Serial.print(", rc=");}
-        if (debug == 1) {Serial.print(mqttClient.state());}
-        if (debug == 1) {Serial.println(", try again in 5 seconds");}
-
-        // Wait 5 seconds before retrying
-        delay(5000);
-      }
+      // Wait 5 seconds before retrying
+      delay(5000);
+     
     }
   }
 
   // Set device status to "ready"
-  mqttPublish(pubDeviceStateTopic, "ready");
+  mqttPublish(pubBtnTopic, "zero", RETAIN);
+  mqttPublish(pubDeviceStateTopic, "ready", RETAIN);
   return true;
 
 }
@@ -354,15 +319,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   // Don't know why this have to be done :-(
   payload[length] = '\0';
 
-  // Print the topic
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-
-  // Make strings and print payload
+  // Make strings
   String msg = String((char*)payload);
   String tpc = String((char*)topic);
-  Serial.println(msg);
+
+  // Print the topic and payload
+  if (debug == 1) {Serial.print(dbText+"Recieved: "+tpc+" = "+msg);}
 
   // Send topic and payload to be interpreted
   mqttResolver(tpc, msg);
@@ -381,12 +343,12 @@ void mqttResolver(String sbTopic, String sbPayload) {
     if (sbPayload == "0") {
       // Turn LED on and report back (via MQTT)
       setLED(0);
-      mqttPublish(pubPushTopic, "0");
+      mqttPublish(pubBtnTopic, "0", RETAIN);
     }
     if (sbPayload == "1") {
       // Turn LED off and don't report back (via MQTT)
       setLED(1);
-      mqttPublish(pubPushTopic, "1");
+      mqttPublish(pubBtnTopic, "1", RETAIN);
     }
   }
 }
@@ -399,9 +361,9 @@ void setLED (int light) {
 
     // Turn LED on of off
     if (light == 0) {
-      digitalWrite(LED_BUILTIN, HIGH);
+      digitalWrite(LED_PIN, HIGH);
     } else {
-      digitalWrite(LED_BUILTIN, LOW);
+      digitalWrite(LED_PIN, LOW);
     }
 
 }
@@ -409,7 +371,7 @@ void setLED (int light) {
 /**
  * Publish messages to MQTT broker 
  */
-void mqttPublish(String pbTopic, String pbPayload) {
+void mqttPublish(String pbTopic, String pbPayload, byte retain) {
 
   // Convert String to char* for the mqttClient.publish() function to work
   char msg[pbPayload.length()+1];
@@ -418,24 +380,42 @@ void mqttPublish(String pbTopic, String pbPayload) {
   pbTopic.toCharArray(tpc, pbTopic.length()+1);
 
   // Report back to pubTopic[]
-  int check = mqttClient.publish(tpc, msg);
+  int check = mqttClient.publish(tpc, msg, retain);
 
   // TODO check "check" integer to see if all went ok
 
   // Print information
-  Serial.print("Message sent    [");
-  Serial.print(pbTopic);
-  Serial.print("] ");
-  Serial.println(pbPayload);
+  if (debug == 1) {Serial.println(dbText+"Sending: "+pbTopic+" = "+pbPayload);}
 
   // Action 1 is executed, ready for new action
   actionOne = 0;
 
 }
 
-/*
- * Main program loop
- */
+// --------------------------------------------------------------------------------------------------
+//  Function that gets called when the button is pressed
+// --------------------------------------------------------------------------------------------------
+void btnPressed () {
+    if (debug == 1) {Serial.println(dbText+"Button pressed");}
+
+    // Toggle button function
+    if (btnState == 0) {
+      if (debug == 1) {Serial.println(dbText+"Set to HIGH");}
+      digitalWrite(LED_PIN, HIGH);
+      btnState = 1;
+    } else {
+      if (debug == 1) {Serial.println(dbText+"Set to LOW");}
+      digitalWrite(LED_PIN, LOW);
+      btnState = 0;
+    }
+
+    mqttPublish(pubBtnTopic, "one", RETAIN);  // Publish new LED state
+}
+
+
+// --------------------------------------------------------------------------------------------------
+// Main program loop
+// --------------------------------------------------------------------------------------------------
 void loop()
 {
 
@@ -450,15 +430,15 @@ void loop()
     mqttConnect();
   }
 
-  // Wait for incoming MQTT messages
-  mqttClient.loop();
 
-  // Check for IotWebConfig actions (should be called as frequently as possible)
-  iotWebConf.doLoop();
+  // Run repetitive jobs
+  mqttClient.loop();        // Wait for incoming MQTT messages
+  iotWebConf.doLoop();      // Check for IotWebConfig actions (should be called as frequently as possible)
+  button.read();            // Check for pushbutton pressed
 
-
+/*
   // Check for button press
-  int btnOnePress = digitalRead(btnOnePin);
+  int btnOnePress = digitalRead(BUTTON_PIN);
   if (btnOnePress == LOW && actionOne == 0) {
     if (debug == 1) {Serial.println(dbText+"Button pressed");}
     delay(300);
@@ -468,13 +448,14 @@ void loop()
     if (btnState == 0) {
       actionOne = 1;                  // Action 1 is executing, new actions forbidden
       setLED(1);                      // Turn on LED
-      mqttPublish(pubPushTopic, "1");  // Publish new LED state
+      mqttPublish(pubBtnTopic, "1", RETAIN);  // Publish new LED state
     } else {
       actionOne = 1;                  // Action 1 is executing, new actions forbidden
       setLED(0);                      // Turn on LED
-      mqttPublish(pubPushTopic, "0");  // Publish new LED state
+      mqttPublish(pubBtnTopic, "0", RETAIN);  // Publish new LED state
     }
   }
+*/
 
 }
 
@@ -526,7 +507,5 @@ void configSaved()
   deviceName = String(cfgDeviceName);
 
   // TODO Hantera/konvertera MQTT-parametrar
-  
-//  servo1min = atoi(cfgServo1Min);
 
 }
