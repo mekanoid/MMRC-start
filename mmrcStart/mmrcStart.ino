@@ -18,7 +18,7 @@
 // -----------------------------------------------------------
 #include <PubSubClient.h>     // Library to handle MQTT communication
 #include <IotWebConf.h>       // Library to take care of wifi connection & client settings
-#include "MMRCsettings.h"     // Some of the MMRC client settings
+#include "mmrcSettings.h"     // Some of the MMRC client settings
 
 // For the PubSubClient
 WiFiClient wifiClient;
@@ -143,15 +143,18 @@ int btnOnePin = D5;    // Pin for first button
 // Uncomment next line to use built in LED on NodeMCU/Wemos/ESP8266 (which is D4)
 //#define LED_BUILTIN D4
 
+// Debug
+byte debug = 1;               // Set to "1" for debug messages in Serial monitor (9600 baud)
+String dbText = "Main   : ";  // Debug text
+
 
 /*
  * Standard setup function
  */
 void setup() {
   // Setup Arduino IDE serial monitor for "debugging"
-  Serial.begin(9600);
-  Serial.println();
-  Serial.println("Starting setup");
+  if (debug == 1) {Serial.begin(9600);Serial.println("");}
+  if (debug == 1) {Serial.println(dbText+"Starting setup");}
 
   // ------------------------------------------------------------
   // Pin settings
@@ -164,7 +167,7 @@ void setup() {
 
   // ------------------------------------------------------------
   // IotWebConfig start
-  Serial.print("IotWebConf start...");
+  if (debug == 1) {Serial.println(dbText+"IotWebConf setup");}
 
   // Adding up items to show on config web page
   iotWebConf.addParameter(&webMqttServer);
@@ -176,10 +179,11 @@ void setup() {
   iotWebConf.getApTimeoutParameter()->visible = true; // Show/set AP timeout at start
 
 //  iotWebConf.setStatusPin(STATUS_PIN);
-  iotWebConf.setConfigPin(CONFIG_PIN);
-  Serial.println();
-  Serial.print("Config pin: ");
-  Serial.println(CONFIG_PIN);
+//  if (debug == 1) {Serial.println(dbText+"Status pin = "+STATUS_PIN);}
+//  iotWebConf.setConfigPin(CONFIG_PIN);
+//  if (debug == 1) {Serial.println(dbText+"Config pin = "+CONFIG_PIN);}
+  iotWebConf.setConfigSavedCallback(&configSaved);
+  iotWebConf.setWifiConnectionCallback(&wifiConnected);
 
   // -- Initializing the configuration
   iotWebConf.init();
@@ -201,8 +205,6 @@ void setup() {
   server.on("/config", []{ iotWebConf.handleConfig(); });
   server.onNotFound([](){ iotWebConf.handleNotFound(); });
 
-  Serial.println("IotWebConf start...done");
-  Serial.print("Assemble topics...");
 
   // ------------------------------------------------------------
   // Convert char to other variable types
@@ -217,6 +219,7 @@ void setup() {
 
   // ------------------------------------------------------------
   // Assemble topics to subscribe and publish to
+  if (debug == 1) {Serial.println(dbText+"Topics setup");}
 
   // Subscribe
   subTopic[0] = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01+"/set";
@@ -251,18 +254,17 @@ void setup() {
   pubTopicOne = "mmrc/"+deviceID+"/"+node01Id+"/"+node01Prop01;
   pubTopicDeviceState = "mmrc/"+deviceID+"/$state";;
 
-  Serial.println("done");
-  Serial.print("Prepare MQTT...");
 
   // ------------------------------------------------------------
   // Prepare MQTT broker and define function to handle callbacks
+  if (debug == 1) {Serial.println(dbText+"MQTT setup");}
   delay(2000);    // Wait for IotWebServer to start network connection
   int mqttPort = atoi(cfgMqttPort);
   mqttClient.setServer(cfgMqttServer, mqttPort);
   mqttClient.setCallback(mqttCallback);
 
-  Serial.println("done");
-  Serial.println("Setup finished");
+  if (debug == 1) {Serial.println(dbText+"Setup done!");}
+
 }
 
 
@@ -274,23 +276,22 @@ boolean mqttConnect() {
 
   // Loop until we're reconnected
   while (!mqttClient.connected()) {
-    Serial.print("MQTT connection...");
+  if (debug == 1) {Serial.print(dbText+"MQTT connection...");}
 
     // Attempt to connect
     if (mqttClient.connect(cfgDeviceId)) {
-      Serial.println("connected");
-      Serial.print("MQTT client id: ");
-      Serial.println(cfgDeviceId);
+      if (debug == 1) {Serial.println("connected");}
+      if (debug == 1) {Serial.print(dbText+"MQTT client id = ");}
+      if (debug == 1) {Serial.println(cfgDeviceId);}
 
       // Subscribe to all topics
-      Serial.println("Subscribing to:");
+      if (debug == 1) {Serial.println(dbText+"Subscribing to:");}
       for (int i=0; i < nbrSubTopics; i++){
         // Convert String to char* for the mqttClient.subribe() function to work
         subTopic[i].toCharArray(tmpTopic, subTopic[i].length()+1);
   
         // ... print topic
-        Serial.print(" - ");
-        Serial.println(tmpTopic);
+        if (debug == 1) {Serial.println(dbText+" - "+tmpTopic);}
 
         //   ... and subscribe to topic
         mqttClient.subscribe(tmpTopic);
@@ -301,22 +302,22 @@ boolean mqttConnect() {
 
       // More than 5 tries, then start configuration portal (NOT TESTED!)
       if (mqttRetry > 5){
-       Serial.println("failed, starting config portal");
-       mqttRetry = 0;
-       return false;
+        if (debug == 1) {Serial.println("failed, starting config portal");}
+        mqttRetry = 0;
+        return false;
       } else {
-       Serial.print("failed no=");
-       Serial.print(mqttRetry);
-       Serial.print(", rc=");
-       Serial.print(mqttClient.state());
-       Serial.println(", try again in 5 seconds");
-       // Wait 5 seconds before retrying
-       delay(5000);
+        if (debug == 1) {Serial.print(dbText+"failed no=");}
+        if (debug == 1) {Serial.print(mqttRetry);}
+        if (debug == 1) {Serial.print(", rc=");}
+        if (debug == 1) {Serial.print(mqttClient.state());}
+        if (debug == 1) {Serial.println(", try again in 5 seconds");}
+
+        // Wait 5 seconds before retrying
+        delay(5000);
       }
     }
   }
   return true;
-  Serial.println("---");
 
 }
 
@@ -420,7 +421,7 @@ void loop()
     }
   }
   else if ((iotWebConf.getState() == IOTWEBCONF_STATE_ONLINE) && (!mqttClient.connected())) {
-    Serial.println("MQTT reconnect");
+    if (debug == 1) {Serial.println(dbText+"MQTT reconnect");}
     mqttConnect();
   }
 
@@ -434,7 +435,7 @@ void loop()
   // Check for button press
   int btnOnePress = digitalRead(btnOnePin);
   if (btnOnePress == LOW && actionOne == 0) {
-    Serial.println("Button One pressed");
+    if (debug == 1) {Serial.println(dbText+"Button pressed");}
     delay(300);
 
     // Publish button press
@@ -488,4 +489,19 @@ void handleRoot()
 void wifiConnected() {
   // We are ready to start the MQTT connection
   needMqttConnect = true;
+}
+
+// --------------------------------------------------------------------------------------------------
+//  Function that gets called when web page config has been saved
+// --------------------------------------------------------------------------------------------------
+void configSaved()
+{
+  if (debug == 1) {Serial.println(dbText+"IotWebConf config saved");}
+  deviceID = String(cfgDeviceId);
+  deviceName = String(cfgDeviceName);
+
+  // TODO Hantera/konvertera MQTT-parametrar
+  
+//  servo1min = atoi(cfgServo1Min);
+
 }
