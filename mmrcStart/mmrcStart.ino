@@ -11,8 +11,8 @@
 //    Foundation, either version 3 of the License, or
 //    (at your option) any later version.
 //
-//     Uses and have been tested witch the following libraries
-//      PubSubClient v2.7.0 by Nick O'Leary - https://pubsubclient.knolleary.net/
+//     Uses and have been tested with the following libraries
+//      PubSubClient v2.7.0 by Nick O'Leary   - https://pubsubclient.knolleary.net/
 //      IotWebConf   v2.3.0 by Balazs Kelemen - https://github.com/prampec/IotWebConf
 //      EasyButton   v1.1.1 by Evert Arias    - https://github.com/evert-arias/EasyButton
 //  
@@ -39,7 +39,7 @@ EasyButton button(BUTTON_PIN, 100, false, true);
 
 // Access point configuration
 const char thingName[] = APNAME;                  // Initial AP name, used as SSID of the own Access Point
-const char wifiInitialApPassword[] = APPASSWORD;  // Initial password, used when it creates an own Access Point
+const char wifiInitialApPassword[] = APPASSWORD;  // Initial password, used to the own Access Point
 
 // Device configuration
 char cfgMqttServer[STRING_LEN];
@@ -66,8 +66,9 @@ String pubBtnTopic;           // Topic showing the state of pushbutton
 String pubBtnContent;         // Initial state of button
 String pubDeviceStateTopic;   // Topic showing the state of device
 
-const byte NORETAIN = 0;
-const byte RETAIN = 1;
+const byte NORETAIN = 0;      // Used to publish topics as NOT retained
+const byte RETAIN = 1;        // Used to publish topics as retained
+
 
 // --------------------------------------------------------------------------------------------------
 // IotWebConfig variables
@@ -83,6 +84,7 @@ void configSaved();
 DNSServer dnsServer;
 WebServer server(80);
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword);
+
 
 // --------------------------------------------------------------------------------------------------
 // Define settings to show up on configuration web page
@@ -100,6 +102,7 @@ IotWebConfSeparator separator2 = IotWebConfSeparator("Enhetens inställningar");
 // Add configuration for Device
 IotWebConfParameter webDeviceId = IotWebConfParameter("Enhetens unika id", "deviceId", cfgDeviceId, STRING_LEN);
 IotWebConfParameter webDeviceName = IotWebConfParameter("Enhetens namn", "deviceName", cfgDeviceName, STRING_LEN);
+
 
 // --------------------------------------------------------------------------------------------------
 // Other variables
@@ -125,11 +128,8 @@ void setup() {
   if (debug == 1) {Serial.begin(9600);Serial.println("");}
   if (debug == 1) {Serial.println(dbText+"Starting setup");}
 
-  // ------------------------------------------------------------------------------------------------
-  // Pin settings
-  
-  // Define build-in LED pin as output
-  //  if (debug == 1) {Serial.println(dbText+"Config pin = "+CONFIG_PIN);}
+  // Define LED pin for output
+  if (debug == 1) {Serial.println(dbText+"LED pin = "+LED_PIN);}
   pinMode(LED_PIN, OUTPUT);
 
 
@@ -144,7 +144,8 @@ void setup() {
 
   // Add the callback function to be called when the button is pressed
   button.onPressed(btnPressed);
-  
+
+
   // ------------------------------------------------------------------------------------------------
   // IotWebConfig start
   if (debug == 1) {Serial.println(dbText+"IotWebConf setup");}
@@ -226,6 +227,7 @@ void setup() {
   pubBtnTopic = "mmrc/"+deviceID+"/button01/push";
   pubBtnContent = "zero";
   pubDeviceStateTopic = "mmrc/"+deviceID+"/$state";
+
 
   // ------------------------------------------------------------------------------------------------
   // Prepare MQTT broker and define function to handle callbacks
@@ -382,7 +384,9 @@ void btnPressed () {
       btnState = 0;
     }
 
-    mqttPublish(pubBtnTopic, "one", NORETAIN);  // Publish new button state
+    // Publish new button state
+    mqttPublish(pubBtnTopic, "one", NORETAIN);  
+
 }
 
 
@@ -403,10 +407,9 @@ void loop()
     mqttConnect();
   }
 
-
   // Run repetitive jobs
   mqttClient.loop();        // Wait for incoming MQTT messages
-  iotWebConf.doLoop();      // Check for IotWebConfig actions (should be called as frequently as possible)
+  iotWebConf.doLoop();      // Check for IotWebConfig actions
   button.read();            // Check for pushbutton pressed
 
 }
@@ -456,6 +459,7 @@ void wifiConnected() {
   // We are ready to start the MQTT connection
   needMqttConnect = true;
 }
+
 
 // --------------------------------------------------------------------------------------------------
 //  Function that gets called when web page config has been saved
